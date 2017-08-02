@@ -81,21 +81,13 @@ final class SpanMap
 			if (start < s_end && end > s_start) {
 				spans.remove(i);
 				if (start > s_start) {
-					Span clone = new Span(s_start, start);
-					clone.setBold(s.isBold());
-					clone.setItalic(s.isItalic());
-					if (s.isColorEnable()) {
-						clone.setColor(s.getColor());
-					}
+					Span clone = new Span(s);
+					clone.setPosition(s_start, start);
 					spans.add(clone);
 				}
 				if (end < s_end) {
-					Span clone = new Span(end, s_end);
-					clone.setBold(s.isBold());
-					clone.setItalic(s.isItalic());
-					if (s.isColorEnable()) {
-						clone.setColor(s.getColor());
-					}
+					Span clone = new Span(s);
+					clone.setPosition(end, s_end);
 					spans.add(clone);
 				}
 				break;

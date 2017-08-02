@@ -33,7 +33,7 @@ public abstract class HighLightTask implements Runnable
 	protected abstract void doHighLight(String code);
 
 	protected void highlight(Span span) {
-		currentCode.setSpan(span);
+		currentCode.setSpan(new Span(span));
 	}
 
 	public void notifyUpdate() {

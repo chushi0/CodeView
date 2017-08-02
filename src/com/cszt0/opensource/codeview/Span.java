@@ -4,7 +4,7 @@ public final class Span
 {
 	private int start;
 	private int end;
-	
+
 	private int color;
 	private boolean colorEnable;
 	private boolean bold;
@@ -14,15 +14,27 @@ public final class Span
 		this.start = start;
 		this.end = end;
 	}
-	
+
+	public Span() {
+	}
+
+	public Span(Span span) {
+		start = span.start;
+		end = span.end;
+		color = span.color;
+		colorEnable = span.colorEnable;
+		bold = span.bold;
+		italic = span.italic;
+	}
+
 	public int start() {
 		return start;
 	}
-	
+
 	public int end() {
 		return end;
 	}
-	
+
 	public void setPosition(int start, int end) {
 		this.start = start;
 		this.end = end;
@@ -43,16 +55,16 @@ public final class Span
 	public boolean isItalic() {
 		return italic;
 	}
-	
+
 	public void setColor(int color) {
 		this.color = color;
 		this.colorEnable = true;
 	}
-	
+
 	public int getColor() {
 		return color;
 	}
-	
+
 	public boolean isColorEnable() {
 		return colorEnable;
 	}

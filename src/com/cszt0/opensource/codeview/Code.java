@@ -8,14 +8,24 @@ import java.util.Arrays;
 
 final class Code implements CharSequence
 {
+	private CodeView cv;
 	private ArrayList<LineSource> lines;
 
-	Code() {
+	Code(CodeView cv) {
+		this.cv = cv;
 		lines = new ArrayList<>();
 		lines.add(new LineSource(""));
 	}
 
+	private void newLine(CharSequence text, int position) {
+		LineSource newLine = text instanceof LineSource ?(LineSource)text: new LineSource(text == null ?"": text.toString());
+		if (position == -1) position = lines.size() - 1;
+		lines.add(position, newLine);
+		cv.onNewLine(newLine, position + 1);
+	}
+
 	public void delete(int start, int end) {
+		CharSequence content = subSequence(start, end);
 		int[] startPosition = getPosition(start);
 		int[] endPosition = getPosition(end);
 		if (startPosition[1] == endPosition[1]) {
@@ -26,10 +36,12 @@ final class Code implements CharSequence
 			ls1.delete(startPosition[0], ls1.length());
 			LineSource ls2 = lines.get(endPosition[1]);
 			ls2.delete(0, endPosition[0]);
-			for (int i=startPosition[1] + 1;i < endPosition[1];i++) {
+			ls1.append(ls2);
+			for (int i = endPosition[1];i > startPosition[1];i--) {
 				lines.remove(i);
 			}
 		}
+		cv.onDelete(start, end - start, content);
 	}
 
 	public int getPosition(int[] pos) {
@@ -63,7 +75,7 @@ final class Code implements CharSequence
 				return new int[] {position, i};
 			}
 		}
-		throw new IndexOutOfBoundsException();
+		throw new IndexOutOfBoundsException("position=" + position + " length=" + length());
 	}
 
 	public synchronized void draw(Canvas canvas, float xScroll, float yScroll, int viewWidth, int viewHeight, Paint paint) {
@@ -83,20 +95,29 @@ final class Code implements CharSequence
 
 	public Code append(CharSequence p1) {
 		String[] raw = p1.toString().split("\n", 0);
-		LineSource end = lines.get(lines.size() - 1);
+		int lineno = lines.size() - 1;
+		LineSource end = lines.get(lineno);
+		String oldLineSource = end.toString();
 		end.append(raw[0]);
+		String newLineSource = end.toString();
+		cv.onLineChange(oldLineSource, newLineSource, lineno);
 		int len = raw.length;
 		for (int i=1;i < len;i++) {
-			lines.add(new LineSource(raw[i]));
+			newLine(raw[i], -1);
 		}
 		return this;
 	}
 
 	public Code append(char p1) {
 		if (p1 == '\n') {
-			lines.add(new LineSource(""));
+			newLine(null, -1);
 		} else {
-			lines.get(lines.size() - 1).append(p1);
+			int lineno = lines.size() - 1;
+			LineSource line = lines.get(lineno);
+			String o = line.toString();
+			line.append(p1);
+			String n = line.toString();
+			cv.onLineChange(o, n, lineno);
 		}
 		return this;
 	}
@@ -106,7 +127,10 @@ final class Code implements CharSequence
 		LineSource rawlineSource = lines.get(pos[1]);
 		String[] raw = text.toString().split("\n", 0);
 		if (raw.length == 1) {
+			String o = rawlineSource.toString();
 			rawlineSource.appendAt(text, pos[0]);
+			String n = rawlineSource.toString();
+			cv.onLineChange(o, n, pos[0]);
 		} else {
 			int length = raw.length;
 			LineSource[] newLines = new LineSource[length];
@@ -116,7 +140,12 @@ final class Code implements CharSequence
 			newLines[0].appendAt(rawlineSource.subSequence(0, pos[0]), 0);
 			newLines[length - 1].append(rawlineSource.subSequence(pos[0], rawlineSource.length()));
 			lines.remove(pos[1]);
-			lines.addAll(pos[1], Arrays.asList(newLines));
+			lines.add(pos[1], newLines[0]);
+			cv.onLineChange(rawlineSource, newLines[0], pos[1]);
+			int len = newLines.length;
+			for (int i=1;i < len;i++) {
+				newLine(newLines[i], pos[1] + i);
+			}
 		}
 		return this;
 	}
@@ -125,13 +154,16 @@ final class Code implements CharSequence
 		int[] pos = getPosition(position);
 		LineSource rawLineSource = lines.get(pos[1]);
 		if (c == '\n') {
-			LineSource s1 = new LineSource(rawLineSource.subSequence(0, pos[0]));
-			LineSource s2 = new LineSource(rawLineSource.subSequence(pos[0], rawLineSource.length()));
+			LineSource s1 = new LineSource(rawLineSource.subSequence(0, pos[0]).toString());
+			LineSource s2 = new LineSource(rawLineSource.subSequence(pos[0], rawLineSource.length()).toString());
 			lines.remove(pos[1]);
 			lines.add(pos[1], s2);
-			lines.add(pos[1], s1);
+			cv.onLineChange(rawLineSource, s2, pos[1]);
+			newLine(s1, pos[1]);
 		} else {
+			String o = rawLineSource.toString();
 			rawLineSource.appendAt(c + "", pos[0]);
+			cv.onLineChange(o, rawLineSource, pos[1]);
 		}
 		return this;
 	}
@@ -143,9 +175,12 @@ final class Code implements CharSequence
 			LineSource s2 = lines.get(pos[1] + 1);
 			s1.append(s2);
 			lines.remove(pos[1] + 1);
+			cv.onDelete(position, 1, "\n");
 		} else {
 			LineSource lineSource = lines.get(pos[1]);
+			String c = String.valueOf(lineSource.charAt(pos[0]));
 			lineSource.deleteAt(pos[0]);
+			cv.onDelete(position, 1, c);
 		}
 		return this;
 	}
@@ -180,18 +215,18 @@ final class Code implements CharSequence
 	public CharSequence subSequence(int p1, int p2) {
 		int[] pos1 = getPosition(p1);
 		int[] pos2 = getPosition(p2);
-		if(pos1[1] == pos2[1]) {
-			return lines.get(pos1[1]).subSequence(pos1[0],pos2[0]);
+		if (pos1[1] == pos2[1]) {
+			return lines.get(pos1[1]).subSequence(pos1[0], pos2[0]);
 		}
 		StringBuilder builder = new StringBuilder();
 		LineSource ls1 = lines.get(pos1[1]);
-		builder.append(ls1.subSequence(pos1[0],ls1.length()));
+		builder.append(ls1.subSequence(pos1[0], ls1.length()));
 		builder.append("\n");
-		for(int i=pos1[1]+1;i<pos2[1];i++) {
+		for (int i=pos1[1] + 1;i < pos2[1];i++) {
 			builder.append(lines.get(i));
 			builder.append("\n");
 		}
-		builder.append(lines.get(pos2[1]).subSequence(0,pos2[0]));
+		builder.append(lines.get(pos2[1]).subSequence(0, pos2[0]));
 		return builder.toString();
 	}
 
@@ -226,29 +261,17 @@ final class Code implements CharSequence
 			lines.get(pos_start[1]).setSpan(span);
 		} else {
 			LineSource ls1 = lines.get(pos_start[1]);
-			Span s1 = new Span(pos_start[0], ls1.length());
-			s1.setBold(span.isBold());
-			s1.setItalic(span.isItalic());
-			if (span.isColorEnable()) {
-				s1.setColor(span.getColor());
-			}
+			Span s1 = new Span(span);
+			s1.setPosition(pos_start[0], ls1.length());
 			ls1.setSpan(s1);
 			LineSource ls2 = lines.get(pos_end[1]);
-			Span s2 = new Span(0, pos_end[0]);
-			s2.setBold(span.isBold());
-			s2.setItalic(span.isItalic());
-			if (span.isColorEnable()) {
-				s2.setColor(span.getColor());
-			}
+			Span s2 = new Span(span);
+			s2.setPosition(0, pos_end[0]);
 			ls2.setSpan(s2);
 			for (int i = pos_start[1] + 1;i < pos_end[1];i++) {
 				LineSource line = lines.get(i);
-				Span s = new Span(0, line.length());
-				s.setBold(span.isBold());
-				s.setItalic(span.isItalic());
-				if (span.isColorEnable()) {
-					s.setColor(span.getColor());
-				}
+				Span s = new Span(span);
+				s.setPosition(0, line.length());
 				line.setSpan(s);
 			}
 		}

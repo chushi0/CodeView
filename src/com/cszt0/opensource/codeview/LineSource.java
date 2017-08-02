@@ -40,7 +40,7 @@ final class LineSource implements CharSequence
 	}
 
 	@Override
-	public String subSequence(int p1, int p2) {
+	public CharSequence subSequence(int p1, int p2) {
 		return raw.substring(p1, p2);
 	}
 	@Override

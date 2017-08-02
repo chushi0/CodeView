@@ -1,9 +1,11 @@
 package com.cszt0.opensource.codeview;
 
 import android.content.Context;
+import android.content.res.TypedArray;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.text.Editable;
 import android.text.InputType;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
@@ -15,9 +17,10 @@ import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import java.util.Timer;
 import java.util.TimerTask;
-import android.content.res.TypedArray;
+import java.util.ArrayList;
+import java.util.HashSet;
 
-public class CodeView extends View
+public class CodeView extends View implements TextWatcher
 {
 	private static final int DEFAULT_TEXT_COLOR = 0xff000000;
 	private static final int DEFAULT_TEXT_SIZE = 35;
@@ -41,6 +44,9 @@ public class CodeView extends View
 	private TimerTask flashCursorTask;
 	private Timer flashCursor;
 	private boolean isCursorShowing;
+	private HashSet<TextWatcher> textWatcher;
+	private OnSelectionListener mSelectionListener;
+	private OnLongTouchListener mLongTouchListener;
 
 	private float xScroll, yScroll;
 	private float xMaxScroll, yMaxScroll;
@@ -49,6 +55,7 @@ public class CodeView extends View
 	private float vX, vY;
 	private boolean responseKeyboard;
 	private boolean isTouching;
+	private long touchTime;
 
 	private boolean isSelection;
 	private boolean isSelectioning;
@@ -73,7 +80,7 @@ public class CodeView extends View
 		};
 		flashCursor = new Timer();
 		imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
-		mCode = new Code();
+		textWatcher = new HashSet<>();
 		TypedArray a = context.obtainStyledAttributes(attrs, R.styleable.cszt0_CodeView);
 		mPaint.setTextSize(a.getDimension(R.styleable.cszt0_CodeView_textSize, DEFAULT_TEXT_SIZE));
 		textColor = a.getColor(R.styleable.cszt0_CodeView_textColor, DEFAULT_TEXT_COLOR);
@@ -81,10 +88,7 @@ public class CodeView extends View
 		cursorWidth = a.getInteger(R.styleable.cszt0_CodeView_cursorWidth, DEFAULT_CURSOR_WIDTH);
 		cursorColor = a.getColor(R.styleable.cszt0_CodeView_cursorColor, DEFAULT_CURSOR_COLOR);
 		lineNumberColor = a.getColor(R.styleable.cszt0_CodeView_lineNumberColor, DEFAULT_LINE_NUMBER_COLOR);
-		String defaultText = a.getString(R.styleable.cszt0_CodeView_text);
-		if (defaultText != null) {
-			mCode.append(defaultText);
-		}
+		setText(a.getString(R.styleable.cszt0_CodeView_text));
 		String highlightClassName = a.getString(R.styleable.cszt0_CodeView_highlightClass);
 		if (highlightClassName != null && highlightClassName.length() > 0) {
 			try {
@@ -100,6 +104,22 @@ public class CodeView extends View
 			}
 		}
 		a.recycle();
+	}
+
+	public void setOnSelectionListener(OnSelectionListener mSelectionListener) {
+		this.mSelectionListener = mSelectionListener;
+	}
+
+	public void setOnLongTouchListener(OnLongTouchListener mLongTouchListener) {
+		this.mLongTouchListener = mLongTouchListener;
+	}
+
+	public void addTextWatcher(TextWatcher watcher) {
+		textWatcher.add(watcher);
+	}
+
+	public boolean removeTextWatcher(TextWatcher watcher) {
+		return textWatcher.remove(watcher);
 	}
 
 	public void setHighLightTask(HighLightTask task) {
@@ -200,20 +220,13 @@ public class CodeView extends View
 		checkScroll();
 		invalidate();
 	}
-	
+
 	public float getXMaxScroll() {
 		return xMaxScroll;
 	}
-	
+
 	public float getYMaxScroll() {
 		return yMaxScroll;
-	}
-
-	@Override
-	protected void onSizeChanged(int w, int h, int oldw, int oldh) {
-		super.onSizeChanged(w, h, oldw, oldh);
-		xMaxScroll = mCode.measureWidth(mPaint);
-		yMaxScroll = (mPaint.descent() - mPaint.ascent()) * mCode.getLineCount();
 	}
 
 	@Override
@@ -324,6 +337,7 @@ public class CodeView extends View
 				if (isSelectioning) {
 					selectionEnd = cursorPosition;
 					isSelection = true;
+					callOnSelectionListener();
 				} else {
 					isSelection = false;
 				}
@@ -336,6 +350,7 @@ public class CodeView extends View
 				if (isSelectioning) {
 					selectionEnd = cursorPosition;
 					isSelection = true;
+					callOnSelectionListener();
 				} else {
 					isSelection = false;
 				}
@@ -349,6 +364,7 @@ public class CodeView extends View
 						if (isSelectioning) {
 							selectionEnd = cursorPosition;
 							isSelection = true;
+							callOnSelectionListener();
 						} else {
 							isSelection = false;
 						}
@@ -364,6 +380,7 @@ public class CodeView extends View
 					if (isSelectioning) {
 						selectionEnd = cursorPosition;
 						isSelection = true;
+						callOnSelectionListener();
 					} else {
 						isSelection = false;
 					}
@@ -379,6 +396,7 @@ public class CodeView extends View
 						if (isSelectioning) {
 							selectionEnd = cursorPosition;
 							isSelection = true;
+							callOnSelectionListener();
 						} else {
 							isSelection = false;
 						}
@@ -393,6 +411,7 @@ public class CodeView extends View
 					if (isSelectioning) {
 						selectionEnd = cursorPosition;
 						isSelection = true;
+						callOnSelectionListener();
 					} else {
 						isSelection = false;
 					}
@@ -484,8 +503,23 @@ public class CodeView extends View
 				vX = 0;
 				vY = 0;
 				isTouching = true;
+				touchTime = System.currentTimeMillis();
 				return true;
 			case MotionEvent.ACTION_MOVE:
+				if (System.currentTimeMillis() - touchTime >= 1000) {
+					touchTime = Long.MAX_VALUE;
+					isTouching = false;
+					responseKeyboard = false;
+					isSelectioning = false;
+					cursorLocate(x, y);
+					selectionStart = untilNoEnglish(cursorPosition, -1);
+					selectionEnd = untilNoEnglish(cursorPosition, 1) + 1;
+					cursorPosition = selectionEnd;
+					isSelection = selectionEnd - selectionStart > 0;
+					checkCursorPosition();
+					callOnSelectionListener();
+					callOnLongTouchListener();
+				}
 				float xOffset = lastXScroll - x;
 				float yOffset = lastYScroll - y;
 				xScroll += xOffset;
@@ -493,6 +527,7 @@ public class CodeView extends View
 				checkScroll();
 				if (Math.pow(downX - x, 2) + Math.pow(downY - y, 2) > 100) {
 					responseKeyboard = false;
+					touchTime = Long.MAX_VALUE;
 				}
 				vX = lastXScroll - x;
 				vY = lastYScroll - y;
@@ -506,29 +541,7 @@ public class CodeView extends View
 					showKeyboard();
 					isSelection = false;
 					isSelectioning = false;
-					float leftPadding = mPaint.measureText(String.valueOf(mCode.getLineCount()));
-					float px = xScroll + x - leftPadding;
-					float py = yScroll + y;
-					float height = mPaint.descent() - mPaint.ascent();
-					int line = (int) Math.floor(py / height);
-					if (line < 0) line = 0;
-					if (line >= mCode.getLineCount()) line = mCode.getLineCount() - 1;
-					LineSource lineSource = mCode.getLineSource(line);
-					int len = lineSource.length();
-					float offset = px;
-					int pos = 0;
-					for (int i=0;i < len;i++) {
-						float width = Math.abs(mPaint.measureText(lineSource.subSequence(0, i).toString()) - px);
-						if (width < offset) {
-							pos = i;
-							offset = width;
-						}
-					}
-					if (offset > mPaint.getTextSize()) {
-						pos++;
-					}
-					cursorPosition = mCode.getPosition(new int[] {pos,line});
-					scrollToCursor();
+					cursorLocate(x, y);
 					invalidate();
 					return true;
 				}
@@ -548,6 +561,57 @@ public class CodeView extends View
 					});
 		}
 		return true;
+	}
+
+	private void cursorLocate(float x, float y) {
+		float leftPadding = mPaint.measureText(String.valueOf(mCode.getLineCount()));
+		float px = xScroll + x - leftPadding;
+		float py = yScroll + y;
+		float height = mPaint.descent() - mPaint.ascent();
+		int line = (int) Math.floor(py / height);
+		if (line < 0) line = 0;
+		if (line >= mCode.getLineCount()) line = mCode.getLineCount() - 1;
+		LineSource lineSource = mCode.getLineSource(line);
+		int len = lineSource.length();
+		float offset = px;
+		int pos = 0;
+		for (int i=0;i < len;i++) {
+			float width = Math.abs(mPaint.measureText(lineSource.subSequence(0, i).toString()) - px);
+			if (width < offset) {
+				pos = i;
+				offset = width;
+			}
+		}
+		if (offset > mPaint.getTextSize()) {
+			pos++;
+		}
+		cursorPosition = mCode.getPosition(new int[] {pos,line});
+		scrollToCursor();
+	}
+
+	private int untilNoEnglish(int cursorPosition, int vary) {
+		int len = mCode.length();
+		while (cursorPosition > -1 && cursorPosition < len) {
+			char c = mCode.charAt(cursorPosition);
+			if (!String.valueOf(c).matches("\\w")) {
+				cursorPosition -= vary;
+				break;
+			}
+			cursorPosition += vary;
+		}
+		return cursorPosition;
+	}
+
+	private void callOnSelectionListener() {
+		if (mSelectionListener != null) {
+			mSelectionListener.onSelection(getSelectionText());
+		}
+	}
+
+	private void callOnLongTouchListener() {
+		if (mLongTouchListener != null) {
+			mLongTouchListener.onLongTouch(isSelection);
+		}
 	}
 
 	private void delete(int start, int end) {
@@ -624,8 +688,12 @@ public class CodeView extends View
 	}
 
 	public void setText(String code) {
-		mCode = new Code();
-		mCode.append(code);
+		mCode = new Code(this);
+		if (code != null) {
+			mCode.append(code);
+		}
+		xMaxScroll = mCode.measureWidth(mPaint);
+		yMaxScroll = (mPaint.descent() - mPaint.ascent()) * mCode.getLineCount();
 		cursorPosition = 0;
 		notifyUpdate();
 		invalidate();
@@ -671,6 +739,37 @@ public class CodeView extends View
 		return lineNumberColor;
 	}
 
+	@Override
+	public void onInputText(CharSequence text, int cursorPosition) {
+		for (TextWatcher watcher:textWatcher) {
+			watcher.onInputText(text, cursorPosition);
+		}
+	}
+
+	@Override
+	public void onLineChange(CharSequence oldLineSource, CharSequence newLineSource, int lineno) {
+		for (TextWatcher watcher:textWatcher) {
+			watcher.onLineChange(oldLineSource, newLineSource, lineno);
+		}
+		xMaxScroll = mCode.measureWidth(mPaint);
+	}
+
+	@Override
+	public void onNewLine(CharSequence newLine, int lineno) {
+		for (TextWatcher watcher:textWatcher) {
+			watcher.onNewLine(newLine, lineno);
+		}
+		yMaxScroll = (mPaint.descent() - mPaint.ascent()) * mCode.getLineCount();
+	}
+
+	@Override
+	public void onDelete(int start, int len, CharSequence content) {
+		for (TextWatcher watcher:textWatcher) {
+			watcher.onDelete(start, len, content);
+		}
+		xMaxScroll = mCode.measureWidth(mPaint);
+	}
+
 	class IInputConnection extends BaseInputConnection
 	{
 		public IInputConnection() {
@@ -687,5 +786,50 @@ public class CodeView extends View
 			invalidate();
 			return true;
 		}
+
+		@Override
+		public Editable getEditable() {
+			return Editable.Factory.getInstance().newEditable(mCode);
+		}
+
+		@Override
+		public CharSequence getSelectedText(int flags) {
+			return getSelectionText();
+		}
+
+		@Override
+		public boolean setSelection(int start, int end) {
+			if (start == end) {
+				cursorPosition = start;
+				checkCursorPosition();
+				invalidate();
+			} else {
+				isSelection = true;
+				selectionStart = start;
+				selectionEnd = end;
+				cursorPosition = end;
+				checkCursorPosition();
+				invalidate();
+			}
+			return true;
+		}
+
+		@Override
+		public boolean deleteSurroundingText(int beforeLength, int afterLength) {
+			delete(cursorPosition - beforeLength, cursorPosition + afterLength);
+			invalidate();
+			return true;
+		}
+
+	}
+
+	public static abstract interface OnSelectionListener
+	{
+		public abstract void onSelection(String selectionText);
+	}
+
+	public static abstract interface OnLongTouchListener
+	{
+		public abstract void onLongTouch(boolean isSelection);
 	}
 }

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+	<declare-styleable name="cszt0_CodeView">
+		<attr name="text" format="string" />
+		<attr name="textColor" format="color" />
+		<attr name="textSize" format="dimension" />
+		<attr name="textSelectionBackgroundColor" format="color" />
+		<attr name="cursorWidth" format="integer" />
+		<attr name="cursorColor" format="color"/>
+		<attr name="highlightClass" format="string" />
+		<attr name="lineNumberColor" format="color" />
+	</declare-styleable>
+</resources>
